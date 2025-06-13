@@ -6,19 +6,22 @@
 
 ## Introduction
 
-This is a stripped back fork of Alcantors LotusECU-T4e tool. The monitoring and live tuner applicaiton is now standalone.
-This program is compatible with Lotus Exige V6 cars running the P138 firmware, with an unlocked calibration.
+This tool is based on the tuner branch of Alcantor's LotusECU-T4e. I have used the previously described methods for CAN communication, and implemented them into a ground up rewrite that allows monitoring, logging, and live tuning of T6e cars.
 
-For firmware flashing use [LotusECU-T4e](https://github.com/Alcantor/LotusECU-T4e)
+This program is compatible with Lotus Exige V6 running the P138 firmware, with an unlocked calibration.
+
+For firmware flashing continue to use [LotusECU-T4e](https://github.com/Alcantor/LotusECU-T4e).
+
+I will update this tool, and definitions, as and when I have time.
 
 ## Installation (usb2can)
 
 1.  **Python:** Ensure you have Python 3 installed. The recommended install is [3.9.7](https://www.python.org/downloads/release/python-397/) for environment compatibility with [Lotus Flasher](https://github.com/Alcantor/LotusECU-T4e)
-2.  **Dependencies:** Install the required Python libraries. The primary dependencies are `python-can`, and `pyserial`. Open an elevated command prompt and run the following.
+2.  **Dependencies:** Install the required Python libraries. The primary dependencies are `python-can`, `pyserial`, and `pyqt5`. Open an elevated command prompt and run the following.
     ```bash
     pip install python-can
     pip install pyserial
-    # Add any other specific dependencies if identified, e.g., for a specific CAN interface backend
+    pip install pyqt5
     # pip install can-isotp # (Potentially needed depending on python-can version and usage)
     ```
 3.  **CAN Interface Driver 1:** Install the necessary drivers for the [Korlan](https://shop.8devices.com/index.php?route=product/product&path=67&product_id=89) Adapter, including the [Windows Driver](https://drive.google.com/drive/folders/1gXWpuP20U2mhcW6IqtwhRo0PY9ZusSYv)
@@ -26,17 +29,19 @@ For firmware flashing use [LotusECU-T4e](https://github.com/Alcantor/LotusECU-T4
 
 ## Usage
 
-Launch Tuner.py
+To run, launch `main_gui.py`
+
+I have populated various basic parameters including RPM, MAF, O2 sensor voltage, fuel trims, etc. As well as some tables for live tuning. 
+
+Variables and Map Tables (RPM, load, VE, Airmass etc) are defined in ecu_definitions.py.
 
 ## Changes
 
-1. Added datalogging. Clicking log will save all monitored variables to a CSV. Various free datalog viewer tools are available.
+1. Rewrote application using pyqt5 as interface library.
 
-## Issues / Todo
+## Issues
  
-- Closing tuner window results in a benign error. Will fix.
-- Battery voltage address is wrong.
-- Gear might work, haven't tested while moving.
-- Need to add a safety check for forward/reverse scaling used when reading and writing to a table, otherwise user may inadvertently mismatch these when addding their own tables, causing written values to be wrong.
-- Need to add colour to the gauge bars, user definable green/orange/red ranges.
-- Need to add more tables to the live editor. 
+- Minimum cell size is slightly too large to fit entire 32x32 tables onto smaller screen (i.e. laptop).
+- Dump and upload calram not yet added.
+- Force zero STFT/LTFT not yet added.
+- Only tested with USB2CAN.
