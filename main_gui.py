@@ -20,28 +20,47 @@ from lib.data_manager import DataManager
 
 
 class GaugeWidget(QWidget):
-    def __init__(self, description, unit, min_val, max_val, gauge_type, parent=None):
+    def __init__(self, description, unit, min_val=0, max_val=100, gauge_type=None, columns=None, offsets=None, parent=None):
         super().__init__(parent)
         self.description = description
         self.unit = unit
         self.min_val = min_val
         self.max_val = max_val
-        self.gauge_type = gauge_type
-        self._value = 0
+        self.gauge_type = gauge_type if gauge_type is not None else "gauge_bar"
 
-        self.setFixedSize(200, 150)
+        self.columns = columns if columns is not None else []
+        self.offsets = offsets if offsets is not None else []
+        self._values = [] 
+
+        if self.gauge_type in ["gauge_bar", "gauge_chart"]:
+            self._value = 0 
+            self.setFixedSize(200, 150)
+        elif self.gauge_type == "gauge_cylinder_bar_chart": # NEW: For the bar chart of cylinders
+            self._values = [0.0] * len(self.columns) # Initialize with numeric zeros
+            self.setFixedSize(200, 150) # Make it taller for bars
 
         if self.gauge_type == "gauge_chart":
-            self.value_history = deque(maxlen=200) # Store last 10 seconds of data, assuming 20 updates/sec
+            self.value_history = deque(maxlen=200)
             self.chart_update_timer = QTimer(self)
             self.chart_update_timer.timeout.connect(self.update)
-            self.chart_update_timer.start(50) # Update every 50ms (20 times per second)
+            self.chart_update_timer.start(50)
 
     def set_value(self, value):
-        self._value = value
-        if self.gauge_type == "gauge_chart":
-            self.value_history.append((time.time(), value))
-        self.update() # This will trigger paintEvent
+        if self.gauge_type in ["gauge_bar", "gauge_chart"]:
+            # For single-value gauges, update _value and history
+            self._value = value
+            if self.gauge_type == "gauge_chart":
+                self.value_history.append((time.time(), value))
+        elif self.gauge_type in ["gauge_table", "gauge_cylinder_bar_chart"]:  # Corrected line to include both types
+            # For multi-value gauges (table and cylinder bar chart), expect a list of values
+            if isinstance(value, list) and len(value) == len(self.columns):
+                self._values = value
+            else:
+                # Log a warning if the input type or length doesn't match expectations
+                print(f"Warning: set_value for '{self.description}' (type: {self.gauge_type}) received invalid data.")
+                print(f"Expected list of length {len(self.columns)}, got {type(value)} with length {len(value) if isinstance(value, list) else 'N/A'}")
+                self._values = [0.0] * len(self.columns)  # Reset to zeros for drawing, or consider ["N/A"] if you want explicit error display
+        self.update()  # Trigger paintEvent to redraw the gauge
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -49,7 +68,6 @@ class GaugeWidget(QWidget):
         painter.setPen(Qt.white)
         font = painter.font()
 
-        # Draw background rectangle for the widget
         painter.setBrush(QBrush(QColor(30, 30, 30)))
         painter.drawRect(self.rect())
 
@@ -57,9 +75,12 @@ class GaugeWidget(QWidget):
             self._paint_gauge_bar(painter, font)
         elif self.gauge_type == "gauge_chart":
             self._paint_gauge_chart(painter, font)
+        # elif self.gauge_type == "gauge_table": # This line will no longer be called directly
+        #     self._paint_gauge_table(painter, font)
+        elif self.gauge_type == "gauge_cylinder_bar_chart": # NEW: Call the new paint method
+            self._paint_gauge_cylinder_bar_chart(painter, font)
 
     def _paint_gauge_bar(self, painter, font):
-        # This method remains UNCHANGED from the previous working version for gauge_bar.
         # Gauge Name and Units
         font.setPointSize(12)
         painter.setFont(font)
@@ -72,7 +93,7 @@ class GaugeWidget(QWidget):
         value_rect = self.rect().adjusted(5, self.height() // 3, -5, -self.height() // 3)
         painter.drawText(value_rect, Qt.AlignCenter, f"{self._value:.1f}")
 
-        # Bar Gauge
+        # Bar Gauge drawing area
         bar_height = 20
         bar_margin = 10
         bar_width = self.width() - 2 * bar_margin
@@ -80,58 +101,49 @@ class GaugeWidget(QWidget):
         bar_rect = self.rect().adjusted(bar_margin, bar_y, -bar_margin, -(self.height() - bar_y - bar_height))
 
         # Draw bar background
-        painter.setBrush(QBrush(QColor(70, 70, 70)))
+        painter.setBrush(QBrush(QColor(70, 70, 70))) # Dark grey background for the bar
         painter.drawRect(bar_rect)
 
-        # Calculate fill level
+        # Calculate fill level based on value within min_val and max_val
         normalized_value = (self._value - self.min_val) / (self.max_val - self.min_val)
         normalized_value = max(0, min(1, normalized_value)) # Clamp between 0 and 1
 
         fill_width = bar_width * normalized_value
-        painter.setBrush(QBrush(QColor(0, 180, 0))) # Green bar
+        painter.setBrush(QBrush(QColor(0, 180, 0))) # Green color for the filled part of the bar
         painter.drawRect(bar_rect.x(), bar_rect.y(), int(fill_width), bar_rect.height())
 
     def _paint_gauge_chart(self, painter, font):
-        # --- MODIFIED: Description, Unit, and Value on the top line ---
-        font.setPointSize(14) # Slightly larger for readability
+        # Description, Unit, and Value on the top line
+        font.setPointSize(14)
         painter.setFont(font)
-
-        # Format the top text: "Description (Unit): Value"
         top_text = f"{self.description} ({self.unit}): {self._value:.1f}"
         
-        # Adjust rectangle to center this text at the top
-        # This rect will be roughly the top quarter of the widget
-        text_rect = self.rect().adjusted(5, 5, -5, -self.height() // 4 * 3) # Adjusted to give space for chart below
+        # Rectangle for the top text
+        text_rect = self.rect().adjusted(5, 5, -5, -self.height() // 4 * 3)
         painter.drawText(text_rect, Qt.AlignHCenter | Qt.AlignTop, top_text)
 
-
-        # Chart drawing area - positioned below the top text
+        # Chart drawing area, positioned below the top text
         chart_margin = 10
-        
-        # Calculate chart_rect.y() to start below the top text,
-        # and adjust height accordingly
-        chart_top_y = text_rect.bottom() + 5 # Start 5 pixels below the text_rect
+        chart_top_y = text_rect.bottom() + 5 # Start 5 pixels below the text
         chart_height = self.height() - chart_top_y - chart_margin # Remaining height minus bottom margin
-
         chart_rect = self.rect().adjusted(
             chart_margin, 
             int(chart_top_y), 
             -chart_margin, 
-            -(self.height() - chart_top_y - chart_height) # Adjust bottom of rect
+            -(self.height() - chart_top_y - chart_height)
         )
-        # Ensure chart_rect has positive dimensions
+        
         if chart_rect.height() <= 0:
             return # Not enough space to draw chart
 
-
         # Draw chart background
-        painter.setBrush(QBrush(QColor(40, 40, 40)))
+        painter.setBrush(QBrush(QColor(40, 40, 40))) # Darker background for the chart area
         painter.drawRect(chart_rect)
 
         if len(self.value_history) < 2:
             return # Not enough data to draw a line
 
-        # Calculate X-axis (time) range - last 10 seconds
+        # Calculate X-axis (time) range - typically last 10 seconds
         current_time = time.time()
         start_time_chart = current_time - 10
         end_time_chart = current_time
@@ -140,35 +152,138 @@ class GaugeWidget(QWidget):
         visible_history = [(t, v) for t, v in self.value_history if t >= start_time_chart]
 
         if len(visible_history) < 2:
-            return # Still not enough data
+            return # Still not enough data after filtering
 
         # Draw the chart line
-        painter.setPen(QPen(QColor(0, 200, 255), 2)) # Blue line for the chart
+        painter.setPen(QPen(QColor(0, 200, 255), 2)) # Blue line for the chart data
 
         points = []
         for t, value in visible_history:
-            # Normalize time for X-axis
+            # Normalize time for X-axis (0 to 1 across the chart width)
             time_normalized = (t - start_time_chart) / (end_time_chart - start_time_chart)
             x = chart_rect.x() + time_normalized * chart_rect.width()
 
             # Normalize value for Y-axis (inverted because Y increases downwards)
             value_normalized = (value - self.min_val) / (self.max_val - self.min_val)
-            value_normalized = max(0, min(1, value_normalized)) # Clamp
+            value_normalized = max(0, min(1, value_normalized)) # Clamp between 0 and 1
             y = chart_rect.y() + (1 - value_normalized) * chart_rect.height()
             points.append(QPointF(x, y))
 
-        # Connect the points
+        # Connect the points to draw the line chart
         for i in range(len(points) - 1):
             painter.drawLine(points[i], points[i+1])
 
-        # Draw min/max lines for reference
-        painter.setPen(QPen(QColor(100, 100, 100), 1, Qt.DotLine))
+        # Draw min/max lines for reference on the chart
+        painter.setPen(QPen(QColor(100, 100, 100), 1, Qt.DotLine)) # Dotted grey lines
         # Min line
-        y_min = chart_rect.y() + (1 - 0) * chart_rect.height() # 0 normalized value
+        y_min = chart_rect.y() + (1 - 0) * chart_rect.height() # 0 normalized value is at bottom
         painter.drawLine(chart_rect.x(), y_min, chart_rect.right(), y_min)
         # Max line
-        y_max = chart_rect.y() + (1 - 1) * chart_rect.height() # 1 normalized value
+        y_max = chart_rect.y() + (1 - 1) * chart_rect.height() # 1 normalized value is at top
         painter.drawLine(chart_rect.x(), y_max, chart_rect.right(), y_max)
+
+    def _paint_gauge_cylinder_bar_chart(self, painter, font):
+        # Main Title (Description)
+        font.setPointSize(14)
+        painter.setFont(font)
+        title_text = f"{self.description} ({self.unit})"
+        title_height = self.height() * 0.15 # Reduced title height for more chart space
+        title_rect = self.rect().adjusted(5, 5, -5, -(self.height() - int(title_height) - 5))
+        painter.drawText(title_rect, Qt.AlignHCenter | Qt.AlignTop, title_text)
+
+        # Chart drawing area
+        chart_margin_x = 10
+        chart_margin_y_top = int(title_height) + 10 # Below title
+        chart_margin_y_bottom = 30 # Space for cylinder numbers
+
+        chart_rect = QRect(
+            chart_margin_x,
+            chart_margin_y_top,
+            self.width() - 2 * chart_margin_x,  # Expand horizontally
+            self.height() - chart_margin_y_top - chart_margin_y_bottom
+        )
+
+        # Draw chart background
+        painter.setBrush(QBrush(QColor(40, 40, 40)))
+        painter.drawRect(chart_rect)
+
+        if not self.columns or not self._values:
+            return # No data to draw
+
+        num_bars = len(self.columns)
+        if num_bars == 0:
+            return
+
+        bar_spacing = 10 # Fixed spacing between bars
+        total_spacing = bar_spacing * (num_bars - 1)
+        bar_width = (chart_rect.width() - total_spacing) / num_bars
+        if bar_width <= 0: return # Avoid division by zero or negative width
+
+        # Y-axis calculation
+        value_range = self.max_val - self.min_val
+        if value_range == 0: return # Avoid division by zero
+
+        # Zero line and label
+        zero_normalized = (0 - self.min_val) / value_range
+        zero_normalized = max(0, min(1, zero_normalized)) # Clamp between 0 and 1
+        y_zero_pixel = chart_rect.y() + (1 - zero_normalized) * chart_rect.height()
+        painter.setPen(QPen(QColor(100, 100, 100), 1, Qt.DotLine)) # Keep zero line as a reference
+        painter.drawLine(chart_rect.x(), int(y_zero_pixel), chart_rect.right(), int(y_zero_pixel))
+
+        # Draw bars and cylinder numbers
+        for i in range(num_bars):
+            x_pos = chart_rect.x() + i * (bar_width + bar_spacing)
+
+            value = self._values[i] if i < len(self._values) else 0.0
+            display_value = -value if self.description == "Ignition Timing" and isinstance(value, (int, float)) else value
+
+            clamped_value = max(self.min_val, min(self.max_val, display_value))
+
+            normalized_bar_val = (clamped_value - self.min_val) / value_range
+            bar_start_y = chart_rect.y() + (1 - normalized_bar_val) * chart_rect.height()
+            bar_height_actual = abs(normalized_bar_val - zero_normalized) * chart_rect.height()
+
+            if clamped_value >= 0:
+                bar_rect = QRect(int(x_pos), int(bar_start_y), int(bar_width), int(bar_height_actual))
+            else:
+                bar_rect = QRect(int(x_pos), int(y_zero_pixel), int(bar_width), int(bar_height_actual))
+
+            # Determine bar color
+            if self.description == "Knock Retard" and isinstance(display_value, (int, float)):
+                gradient_start_color = QColor(152, 255, 125)
+                gradient_end_color = QColor(255, 102, 102)
+
+                color_normalized_val = max(0.0, min(15.0, display_value))
+                color_interpolation_factor = color_normalized_val / 15.0
+
+                r = int(gradient_start_color.red() * (1 - color_interpolation_factor) + gradient_end_color.red() * color_interpolation_factor)
+                g = int(gradient_start_color.green() * (1 - color_interpolation_factor) + gradient_end_color.green() * color_interpolation_factor)
+                b = int(gradient_start_color.blue() * (1 - color_interpolation_factor) + gradient_end_color.blue() * color_interpolation_factor)
+
+                bar_color = QColor(r, g, b)
+            else:
+                bar_color = QColor(0, 150, 255)
+
+            painter.setBrush(QBrush(bar_color))
+            painter.setPen(Qt.NoPen)
+            painter.drawRect(bar_rect)
+
+            # Draw value on top of the bar
+            font.setPointSize(8)
+            painter.setFont(font)
+            painter.setPen(Qt.white)
+
+            value_text = f"{display_value:.1f}" if isinstance(display_value, (int, float)) else str(display_value)
+            text_rect = QRect(int(x_pos), int(bar_start_y) - 20, int(bar_width), 20)
+            painter.drawText(text_rect, Qt.AlignCenter, value_text)
+
+            # Draw cylinder number below the axis
+            font.setPointSize(8)
+            painter.setFont(font)
+            painter.setPen(Qt.white)
+            cyl_num_text = str(i + 1)
+            cyl_num_rect = QRect(int(x_pos), chart_rect.bottom() + 5, int(bar_width), 20)
+            painter.drawText(cyl_num_rect, Qt.AlignCenter, cyl_num_text)
 
 class DataSourceDialog(QDialog):
     def __init__(self, data_manager_instance, parent=None):
@@ -1055,9 +1170,11 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.data_manager = DataManager()
-        self.gauges = {}
-        self.tables = {}
-        self.maptables = {}
+        self.gauges = {}          # For gauge_bar and gauge_chart
+        self.tables = {}          # For existing QTableWidget display (read-only tables)
+        self.maptables = {}       # For MapTableWidget (2D editable maps)
+        self.table_gauges = {}    # NEW: For single gauges displaying 1D table values
+
         self.ordered_maptable_widgets = []
         self.current_maptable_widget = None
 
@@ -1093,11 +1210,11 @@ class MainWindow(QMainWindow):
         self.log_button.setStyleSheet("background-color: lightgray;")
         control_bar.addWidget(self.log_button)
 
-        control_bar.addStretch() 
+        control_bar.addStretch()
 
         # Elements for maptable cell manipulation
         self.manipulation_layout = QHBoxLayout()
-        
+
         self.value_input = QLineEdit("0.5")
         self.value_input.setValidator(QDoubleValidator()) # Allow only double values
         self.value_input.setFixedWidth(50)
@@ -1128,61 +1245,96 @@ class MainWindow(QMainWindow):
         # Connect the 'tab changed' signal
         self.tab_widget.currentChanged.connect(self._on_tab_changed)
 
+        # Gauges Tab (Now hosts all gauge types in one grid)
         self.gauge_tab_widget = QWidget()
-        self.gauge_layout = QGridLayout(self.gauge_tab_widget) 
+        self.gauge_layout = QGridLayout(self.gauge_tab_widget)
         self.gauge_layout.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         self.tab_widget.addTab(self.gauge_tab_widget, "Gauges")
         print(f"Added 'Gauges' tab. Current tab count: {self.tab_widget.count()}")
 
-        self.table_tab_widget = QWidget()
-        self.table_layout = QVBoxLayout(self.table_tab_widget)
-        self.tab_widget.addTab(self.table_tab_widget, "Tables")
-        print(f"Added 'Tables' tab. Current tab count: {self.tab_widget.count()}")
+        # Tables Tab (for existing QTableWidget displays, 1D read-only tables)
+        self.table_display_tab_widget = QWidget()
+        self.table_display_layout = QVBoxLayout(self.table_display_tab_widget)
+        table_grid_tab_index = self.tab_widget.addTab(self.table_display_tab_widget, "Tables (Grid)")
+        self.tab_widget.setTabVisible(table_grid_tab_index, False) # Hide the tab
+        print(f"Added 'Tables (Grid)' tab. Current tab count: {self.tab_widget.count()}")
 
         first_maptable_tab_index = -1
 
         print("\n--- Populating tabs from ECU_DEFINITIONS ---")
-        
+
         gauge_row = 0
         gauge_col = 0
-        max_gauges_per_row = 8
+        # Determine a reasonable max columns for all gauges.
+        # Since GaugeWidget has a fixed size, a single max_cols should work for all.
+        # Adjust this number based on your desired layout and window size.
+        max_cols_for_gauges = 5 # Example: 5 gauges per row
 
         for i, definition in enumerate(ECU_DEFINITIONS):
-            print(f"Processing definition {i}: Description='{definition.get('description', 'N/A')}', Type='{definition.get('type', 'N/A')}'")
-
             if definition["type"] in ["gauge_bar", "gauge_chart"]:
                 gauge = GaugeWidget(
-                    definition["description"],
-                    definition["unit"],
-                    definition["min_val"],
-                    definition["max_val"],
-                    definition["type"]
+                    description=definition["description"],
+                    unit=definition["unit"],
+                    min_val=definition["min_val"],
+                    max_val=definition["max_val"],
+                    gauge_type=definition["type"]
                 )
                 self.gauges[definition["description"]] = gauge
                 self.gauge_layout.addWidget(gauge, gauge_row, gauge_col)
                 gauge_col += 1
-                if gauge_col >= max_gauges_per_row:
+                if gauge_col >= max_cols_for_gauges:
                     gauge_col = 0
                     gauge_row += 1
-                print(f"  - Added Gauge: {definition['description']} (Type: {definition['type']})")
+                print(f"  - Added Simple Gauge: {definition['description']} (Type: {definition['type']}) at ({gauge_row}, {gauge_col-1})")
 
             elif definition["type"] == "table":
-                table = QTableWidget(1, len(definition["columns"]))
-                table.setHorizontalHeaderLabels(definition["columns"])
-                table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-                table.verticalHeader().setVisible(False)
-                table.setEditTriggers(QTableWidget.NoEditTriggers)
-                table.setFixedSize(600, 60)
-                self.tables[definition["description"]] = table
-                
+                # Add existing read-only QTableWidget display for 1D tables to its own tab
+                table_display_widget = QTableWidget(1, len(definition["columns"]))
+                table_display_widget.setHorizontalHeaderLabels(definition["columns"])
+                table_display_widget.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+                table_display_widget.verticalHeader().setVisible(False)
+                table_display_widget.setEditTriggers(QTableWidget.NoEditTriggers)
+                table_display_widget.setFixedSize(600, 60) # Keep fixed size for compact display
+                self.tables[definition["description"]] = table_display_widget # Store reference
+
                 table_group_box = QVBoxLayout()
                 table_title = QLabel(definition["description"])
                 table_title.setAlignment(Qt.AlignCenter)
                 table_title.setFont(QFont("Arial", 12, QFont.Bold))
                 table_group_box.addWidget(table_title)
-                table_group_box.addWidget(table)
-                self.table_layout.addLayout(table_group_box)
-                print(f"  - Added Read-Only Table: {definition['description']}")
+                table_group_box.addWidget(table_display_widget)
+                self.table_display_layout.addLayout(table_group_box)
+                print(f"  - Added Read-Only Table (Grid): {definition['description']}")
+
+                # Create a single GaugeWidget for the entire 1D table, displayed as a bar chart
+                current_min_val = 0
+                current_max_val = 100 # Default if no specific range defined
+
+                # Set Y-axis limits based on description
+                if definition["description"] == "Ignition Timing":
+                    current_min_val = -25
+                    current_max_val = 50
+                elif definition["description"] == "Knock Retard":
+                    current_min_val = -15
+                    current_max_val = 15
+
+                table_gauge = GaugeWidget(
+                    description=definition["description"],
+                    unit=definition["unit"],
+                    min_val=current_min_val,
+                    max_val=current_max_val,
+                    gauge_type="gauge_cylinder_bar_chart", # New gauge type for multi-bar display
+                    columns=definition["columns"],
+                    offsets=definition["offset"] # Pass the list of offsets
+                )
+                self.table_gauges[definition["description"]] = table_gauge
+                # Add to the main "Gauges" tab's layout using the same row/col logic
+                self.gauge_layout.addWidget(table_gauge, gauge_row, gauge_col)
+                gauge_col += 1
+                if gauge_col >= max_cols_for_gauges: # Use the same max_cols for consistent wrapping
+                    gauge_col = 0
+                    gauge_row += 1
+                print(f"  - Added Table Bar Chart Gauge: {definition['description']} (Type: gauge_cylinder_bar_chart) at ({gauge_row}, {gauge_col-1})")
 
             elif definition["type"] == "maptable":
                 try:
@@ -1190,13 +1342,13 @@ class MainWindow(QMainWindow):
                     self.maptables[definition["description"]] = maptable_widget
                     self.ordered_maptable_widgets.append(maptable_widget)
                     tab_index = self.tab_widget.addTab(maptable_widget, definition["description"])
-                    print(f"  - Added MAPTABLE '{definition['description']}' to tab index: {tab_index}. Total tabs now: {self.tab_widget.count()}")
+                    print(f"  - Added MAPTABLE '{definition['description']}' to tab index: {tab_index}. Total tabs now: {self.tab_widget.count()}")
 
                     if first_maptable_tab_index == -1:
                         first_maptable_tab_index = tab_index
-                        print(f"  - Set '{definition['description']}' as first maptable tab index.")
+                        print(f"  - Set '{definition['description']}' as first maptable tab index.")
                 except Exception as e:
-                    print(f"  - ERROR: Failed to create/add MapTableWidget for '{definition.get('description', 'N/A')}': {e}")
+                    print(f"  - ERROR: Failed to create/add MapTableWidget for '{definition.get('description', 'N/A')}': {e}")
 
 
         print("\n--- Finalizing Tab Selection ---")
@@ -1206,8 +1358,8 @@ class MainWindow(QMainWindow):
         else:
             self.tab_widget.setCurrentIndex(0)
             print(f"No maptables found, setting current tab to 'Gauges' (index 0).")
-        
-        self._on_tab_changed(self.tab_widget.currentIndex()) 
+
+        self._on_tab_changed(self.tab_widget.currentIndex())
 
         print(f"Final current tab index: {self.tab_widget.currentIndex()}")
         print("--- UI Initialization Complete ---")
@@ -1430,25 +1582,29 @@ class MainWindow(QMainWindow):
                 self.log_button.setStyleSheet("background-color: lightgray;")
 
     def update_gui_data(self):
+        """
+        This method is called periodically by the timer to update all GUI elements
+        with the latest data from the ECU/data source.
+        """
         if not self.data_manager.is_connected():
             return
 
-        gauge_values = {}  # Stores processed (scaled/calculated) values for all gauges.
+        gauge_values = {}  # Stores processed (scaled/calculated) values for all simple gauges.
                         # Keys will be 'DESCRIPTION_VALUE' (e.g., 'RPM_VALUE').
                         # Used for display, logging, and as dependencies for other calculations.
-        raw_gauge_values = {}  # Stores raw integer values directly from the ECU.
+        raw_gauge_values = {}  # Stores raw integer values directly from the ECU for simple gauges.
                             # Keys will be 'DESCRIPTION_RAW' (e.g., 'RPM_RAW', 'MAF_RAW').
 
         # Pass 1: Read raw data for ALL definitions with an address and process simple gauges
         # This pass is crucial for populating 'raw_gauge_values' which might be used by calculated gauges in the second pass, and for updating simple gauges.
-        for definition in ECU_DEFINITIONS: # ECU_DEFINITIONS is accessible from lib/ecu_definitions.py
+        for definition in ECU_DEFINITIONS:
             description = definition.get("description", "Unknown")
 
+            # Only process definitions that have a direct address and length (sensor readings, not maps)
             if "address" not in definition or "length" not in definition:
-                continue # Skip definitions that are not direct sensor readings (e.g., just calculated ones)
+                continue 
 
             try:
-                # Read raw bytes from the ECU via the data manager
                 raw_bytes = self.data_manager.read_data(definition["address"], definition["length"])
 
                 if raw_bytes is None or len(raw_bytes) != definition["length"]:
@@ -1456,42 +1612,43 @@ class MainWindow(QMainWindow):
                     raw_gauge_values.pop(f"{description}_RAW", None)
                     if definition.get("type") in ["gauge_bar", "gauge_chart"] and "calculation" not in definition:
                         gauge_values.pop(f"{description}_VALUE", None)
+                        gauge_display_object = self.gauges.get(description)
+                        if gauge_display_object:
+                            gauge_display_object.set_value("N/A")
                     continue
 
-                int_value = int.from_bytes(raw_bytes, byteorder='big', signed=False)
+                if definition.get("type") in ["gauge_bar", "gauge_chart"]:
+                    int_value = int.from_bytes(raw_bytes, byteorder='big', signed=False) # Simple gauges are already big-endian, keep as is
+                    raw_gauge_values[f"{description}_RAW"] = int_value
 
-                # Store the raw integer value. This is critical for formulas using _RAW (like MAF_RAW).
-                raw_gauge_values[f"{description}_RAW"] = int_value
+                    if "calculation" not in definition:
+                        scale = definition.get("scale", 1.0)
+                        offset = definition.get("offset", 0)
+                        scaled_value = (int_value * scale) + offset
 
-                # If this is a simple gauge (not calculated), apply its scale/offset and update its display.
-                if definition.get("type") in ["gauge_bar", "gauge_chart"] and "calculation" not in definition:
-                    scale = definition.get("scale", 1.0)
-                    offset = definition.get("offset", 0)
-                    scaled_value = (int_value * scale) + offset
+                        gauge_values[f"{description}_VALUE"] = scaled_value
 
-                    # Store scaled value using the convention 'DESCRIPTION_VALUE'
-                    gauge_values[f"{description}_VALUE"] = scaled_value
-
-                    # Update the GUI display object for this simple gauge
-                    gauge_display_object = self.gauges.get(description)
-                    if gauge_display_object:
-                        gauge_display_object.set_value(scaled_value)
-                    else:
-                        print(f"Warning: Gauge display object for '{description}' not found in self.gauges during Pass 1.")
+                        gauge_display_object = self.gauges.get(description)
+                        if gauge_display_object:
+                            gauge_display_object.set_value(scaled_value)
+                        else:
+                            print(f"Warning: Gauge display object for '{description}' not found in self.gauges during Pass 1.")
+                elif definition.get("type") == "table":
+                    # Store the raw_bytes for the table definition directly for later use in Pass 3.
+                    raw_gauge_values[f"{description}_RAW_BLOCK"] = raw_bytes
 
             except Exception as e:
-                print(f"Error processing simple gauge '{description}' data in Pass 1: {e}")
-                # Ensure values are cleared if an error occurs during reading/scaling
+                print(f"Error processing gauge '{description}' data in Pass 1: {e}")
                 raw_gauge_values.pop(f"{description}_RAW", None)
                 gauge_values.pop(f"{description}_VALUE", None)
-                gauge_display_object = self.gauges.get(description)
-                if gauge_display_object:
-                    gauge_display_object.set_value("N/A") # Show N/A on GUI for error
+                if definition.get("type") in ["gauge_bar", "gauge_chart"]:
+                    gauge_display_object = self.gauges.get(description)
+                    if gauge_display_object:
+                        gauge_display_object.set_value("N/A")
+
 
         # Pass 2: Process calculated gauges
-        # This pass uses values gathered in Pass 1 (both raw_gauge_values and gauge_values) to perform calculations for gauges with a 'calculation' block.
         for definition in ECU_DEFINITIONS:
-            # Only process gauge types that have a 'calculation' block
             if definition.get("type") in ["gauge_bar", "gauge_chart"] and "calculation" in definition:
                 description = definition.get("description", "Unknown Calculated Gauge")
                 try:
@@ -1504,49 +1661,40 @@ class MainWindow(QMainWindow):
 
                         if not formula_string:
                             print(f"Error: Calculated gauge '{description}' has no 'formula_string'. Skipping.")
-                            continue # Skip if formula string is missing
+                            continue
 
-                        formula_scope = {} # This will hold variables available to eval()
-                        all_dependencies_met = True # Flag to track if all needed dependencies are found/numeric
+                        formula_scope = {}
+                        all_dependencies_met = True
 
-                        # 1. Add fixed parameters from the calculation block (e.g., num_cylinders)
                         for key, value in calculation_info.items():
                             if key not in ["type", "formula_string", "dependencies"]:
                                 formula_scope[key] = value
 
-                        # 2. Populate scope with dependency values (both scaled '_VALUE' and raw '_RAW')
                         for dep_desc in dependencies:
-                            # Attempt to add scaled/processed value (e.g., 'RPM_VALUE')
                             value_key = f"{dep_desc}_VALUE"
                             if value_key in gauge_values and gauge_values[value_key] is not None:
                                 formula_scope[value_key] = gauge_values[value_key]
-                            elif f"{dep_desc}_VALUE" in formula_string: # If formula explicitly uses _VALUE but it's not present
+                            elif f"{dep_desc}_VALUE" in formula_string:
                                 print(f"Error updating calculated gauge '{description}': Missing or None dependency: '{value_key}'. Formula: '{formula_string}'")
                                 all_dependencies_met = False
                                 break
 
-                            # Attempt to add raw value (e.g., 'MAF_RAW')
                             raw_key = f"{dep_desc}_RAW"
                             if raw_key in raw_gauge_values and raw_gauge_values[raw_key] is not None:
                                 formula_scope[raw_key] = raw_gauge_values[raw_key]
-                            elif f"{dep_desc}_RAW" in formula_string: # If formula explicitly uses _RAW but it's not present
+                            elif f"{dep_desc}_RAW" in formula_string:
                                 print(f"Error updating calculated gauge '{description}': Missing or None dependency: '{raw_key}'. Formula: '{formula_string}'")
                                 all_dependencies_met = False
                                 break
                         
                         if not all_dependencies_met:
-                            # Set gauge to an error state if dependencies are missing
                             gauge_display_object = self.gauges.get(description)
                             if gauge_display_object:
                                 gauge_display_object.set_value("N/A")
-                            gauge_values.pop(f"{description}_VALUE", None) # Ensure log reflects error
-                            continue # Skip current calculation
+                            gauge_values.pop(f"{description}_VALUE", None)
+                            continue
 
-                        # 3. Final check: Ensure all variable names in the formula string are in the scope
-                        # This uses regex to find all potential variable names in the formula string
                         required_vars_in_formula = set(re.findall(r'\b[A-Za-z_][A-Za-z0-9_]*\b', formula_string))
-                        
-                        # Remove any variables that are already in formula_scope from fixed parameters or dependencies
                         required_vars_in_formula = {v for v in required_vars_in_formula if v not in formula_scope}
                         
                         for var_name in required_vars_in_formula:
@@ -1562,7 +1710,6 @@ class MainWindow(QMainWindow):
                             gauge_values.pop(f"{description}_VALUE", None)
                             continue
 
-                        # 4. Type conversion for safety before evaluation
                         for key, value in list(formula_scope.items()):
                             if isinstance(value, (int, float)):
                                 continue
@@ -1580,30 +1727,25 @@ class MainWindow(QMainWindow):
                             gauge_values.pop(f"{description}_VALUE", None)
                             continue
 
-                        # Perform the calculation
-                        # Using {"__builtins__": None} for security to restrict eval's access to Python builtins.
                         calculated_value = eval(formula_string, {"__builtins__": None}, formula_scope)
 
-                        # Update the GUI display object for this calculated gauge
                         gauge_display_object = self.gauges.get(description)
                         if gauge_display_object:
                             gauge_display_object.set_value(calculated_value)
                         else:
                             print(f"Warning: Gauge display object for calculated gauge '{description}' not found in self.gauges.")
 
-                        # Store the final calculated value
                         gauge_values[f"{description}_VALUE"] = calculated_value
 
                 except Exception as e:
-                    # Catch errors during the calculation process
                     print(f"Critical Error updating calculated gauge '{description}': {e}. Formula String: '{formula_string}', Scope: {formula_scope}")
                     gauge_display_object = self.gauges.get(description)
                     if gauge_display_object:
-                        gauge_display_object.set_value("ERROR") # Indicate a calculation error on GUI
-                    gauge_values.pop(f"{description}_VALUE", None) # Remove value from logging if calculation failed
+                        gauge_display_object.set_value("ERROR")
+                    gauge_values.pop(f"{description}_VALUE", None)
 
 
-        # Process tables
+        # Pass 3: Process 1D "table" definitions and update both QTableWidget and new GaugeWidget
         for definition in ECU_DEFINITIONS:
             if definition.get("type") == "table":
                 description = definition.get("description", "Unknown Table")
@@ -1612,32 +1754,48 @@ class MainWindow(QMainWindow):
                         print(f"Warning: Table '{description}' definition missing address or length. Skipping.")
                         continue
 
-                    raw_bytes = self.data_manager.read_data(definition["address"], definition["length"])
+                    raw_bytes = raw_gauge_values.get(f"{description}_RAW_BLOCK")
+                    
                     if raw_bytes is None or len(raw_bytes) != definition["length"]:
-                        print(f"Warning: Could not read data for table '{description}'. Length mismatch or None.")
+                        print(f"Warning: Could not retrieve raw data block for table '{description}'. Length mismatch or None.")
+                        table_display_widget = self.tables.get(description)
+                        if table_display_widget:
+                            for col_idx in range(len(definition["columns"])):
+                                item = QTableWidgetItem("N/A")
+                                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                                table_display_widget.setItem(0, col_idx, item)
+                        
+                        table_gauge_obj = self.table_gauges.get(description)
+                        if table_gauge_obj:
+                            table_gauge_obj.set_value(["N/A"] * len(definition["columns"]))
                         continue
 
-                    table = self.tables.get(description)
-                    if table and "columns" in definition:
+                    table_display_widget = self.tables.get(description)
+                    current_table_gauge_values = [] 
+
+                    if table_display_widget and "columns" in definition:
                         element_size = definition.get("element_size", 1)
-
                         definition_scale = definition.get("scale", 1.0)
-                        definition_offset = definition.get("offset", 0)
+                        definition_offsets = definition.get("offset", []) 
 
-                        for col_idx, i in enumerate(range(0, definition["length"], element_size)):
-                            if i + element_size <= len(raw_bytes):
-                                element_bytes = raw_bytes[i : i + element_size]
-                                element_int_val = int.from_bytes(element_bytes, byteorder='big', signed=False)
+                        for col_idx, _ in enumerate(definition["columns"]):
+                            start_byte = col_idx * element_size
+                            end_byte = start_byte + element_size
+                            
+                            if end_byte <= len(raw_bytes):
+                                element_bytes = raw_bytes[start_byte : end_byte]
+                                # Corrected: Reverting to byteorder='big' as per global format
+                                element_int_val = int.from_bytes(element_bytes, byteorder='big', signed=False) 
 
-                                current_offset = definition_offset
-                                if isinstance(definition_offset, list):
-                                    if col_idx < len(definition_offset):
-                                        current_offset = definition_offset[col_idx]
-                                    else:
-                                        print(f"Warning: Offset list too short for column {col_idx} in '{description}'. Using default 0 offset.")
-                                        current_offset = 0
+                                current_offset = 0 
+                                if isinstance(definition_offsets, list) and col_idx < len(definition_offsets):
+                                    current_offset = definition_offsets[col_idx]
+                                else:
+                                    print(f"Warning: Offset list too short or invalid for column {col_idx} in '{description}'. Using default 0 offset.")
 
                                 element_scaled_val = (element_int_val * definition_scale) + current_offset
+                                
+                                current_table_gauge_values.append(element_scaled_val)
 
                                 display_unit = definition.get("unit", "")
                                 display_string = ""
@@ -1648,16 +1806,30 @@ class MainWindow(QMainWindow):
 
                                 item = QTableWidgetItem(display_string)
                                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-                                table.setItem(0, col_idx, item)
+                                table_display_widget.setItem(0, col_idx, item)
                             else:
-                                table.setItem(0, col_idx, QTableWidgetItem("N/A"))
-                                table.item(0, col_idx).setFlags(table.item(0, col_idx).flags() & ~Qt.ItemIsEditable)
+                                table_display_widget.setItem(0, col_idx, QTableWidgetItem("N/A"))
+                                table_display_widget.item(0, col_idx).setFlags(table_display_widget.item(0, col_idx).flags() & ~Qt.ItemIsEditable)
+                                current_table_gauge_values.append("N/A") 
+                    
+                    table_gauge_obj = self.table_gauges.get(description)
+                    if table_gauge_obj:
+                        table_gauge_obj.set_value(current_table_gauge_values)
 
                 except Exception as e:
                     print(f"Error updating table '{description}': {e}")
+                    if description in self.tables:
+                        table_display_widget = self.tables.get(description)
+                        for col_idx in range(len(definition["columns"])):
+                            item = QTableWidgetItem("ERROR")
+                            item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                            table_display_widget.setItem(0, col_idx, item)
+                    table_gauge_obj = self.table_gauges.get(description)
+                    if table_gauge_obj:
+                        table_gauge_obj.set_value(["ERROR"] * len(definition["columns"]))
 
 
-        # Update map table cursor
+        # Update map table cursor (for 2D maptables)
         if self.current_maptable_widget and self.data_manager.is_connected():
             self.current_maptable_widget.update_cursor_position()
 
@@ -1667,20 +1839,35 @@ class MainWindow(QMainWindow):
                 log_header = ["Timestamp"]
                 for def_item in ECU_DEFINITIONS:
                     if def_item.get("type") in ["gauge_bar", "gauge_chart"]:
-                        log_header.append(def_item["description"]) # Log by original description name
+                        log_header.append(def_item["description"])
+                    elif def_item.get("type") == "table":
+                        for col_name in def_item["columns"]:
+                            log_header.append(f"{def_item['description']}_{re.sub(r'[^0-9]', '', col_name)}")
                 self.log_writer.writerow(log_header)
                 self.log_header_written = True
 
             row_data = [time.time()]
             for def_item in ECU_DEFINITIONS:
                 if def_item.get("type") in ["gauge_bar", "gauge_chart"]:
-                    # Retrieve the value by its 'DESCRIPTION_VALUE' key
-                    # If not found (e.g., due to calculation error), log 'N/A'
                     value_to_log = gauge_values.get(f"{def_item['description']}_VALUE")
                     if value_to_log is not None:
                         row_data.append(f"{value_to_log:.2f}")
                     else:
                         row_data.append("N/A")
+                elif def_item.get("type") == "table":
+                    table_gauge_obj = self.table_gauges.get(def_item["description"])
+                    if table_gauge_obj and table_gauge_obj._values:
+                        for value_to_log in table_gauge_obj._values:
+                            if isinstance(value_to_log, (int, float)):
+                                if def_item["description"] == "Ignition Timing":
+                                    row_data.append(f"{-value_to_log:.2f}")
+                                else:
+                                    row_data.append(f"{value_to_log:.2f}")
+                            else:
+                                row_data.append("N/A")
+                    else:
+                        for _ in def_item["columns"]:
+                            row_data.append("N/A")
             self.log_writer.writerow(row_data)
 
     def closeEvent(self, event):

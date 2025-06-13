@@ -1,7 +1,7 @@
 # lib/data_manager.py
 
 import os
-import can # Assuming you have python-can installed for real CAN
+import can
 from lib.can_interface import LiveTuningAccess, ECUException
 from lib.mock_can_interface import MockLiveTuningAccess # For mock data source
 from PyQt5.QtWidgets import QMessageBox
