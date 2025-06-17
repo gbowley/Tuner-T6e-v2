@@ -10,7 +10,7 @@ This tool is based on the tuner branch of Alcantor's LotusECU-T4e. I have used t
 
 This program is compatible with Lotus Exige V6 running the P138 firmware, with an unlocked calibration.
 
-For firmware flashing continue to use [LotusECU-T4e](https://github.com/Alcantor/LotusECU-T4e).
+For firmware flashing use [LotusECU-T4e](https://github.com/Alcantor/LotusECU-T4e).
 
 I will update this tool, and definitions, as and when I have time.
 
