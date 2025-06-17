@@ -42,6 +42,8 @@ Variables and Map Tables (RPM, load, VE, Airmass etc) are defined in ecu_definit
 ## Issues
  
 - Minimum cell size is slightly too large to fit entire 32x32 tables onto smaller screen (i.e. laptop).
+- Rounding logic for Inc/Dec buttons is overzealous.
+- Inc/Dec buttons yield unexpected results on timing tables.
 - Dump and upload calram not yet added.
 - Force zero STFT/LTFT not yet added.
 - Only tested with USB2CAN.
