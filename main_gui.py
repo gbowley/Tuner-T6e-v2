@@ -1265,9 +1265,6 @@ class MainWindow(QMainWindow):
 
         gauge_row = 0
         gauge_col = 0
-        # Determine a reasonable max columns for all gauges.
-        # Since GaugeWidget has a fixed size, a single max_cols should work for all.
-        # Adjust this number based on your desired layout and window size.
         max_cols_for_gauges = 5 # Example: 5 gauges per row
 
         for i, definition in enumerate(ECU_DEFINITIONS):

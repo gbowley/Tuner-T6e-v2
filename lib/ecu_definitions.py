@@ -221,7 +221,7 @@ ECU_DEFINITIONS = [
         "columns": ["Cyl 1", "Cyl 2", "Cyl 3", "Cyl 4", "Cyl 5", "Cyl 6"] 
     },
     {
-        "description": "Volumetric Efficiency Map",
+        "description": "Volumetric Efficiency",
         "type": "maptable",
 
         # Data Block Definition
@@ -260,7 +260,7 @@ ECU_DEFINITIONS = [
         }
     },
     {
-        "description": "Airmass Map",
+        "description": "Airmass",
         "type": "maptable",
 
         # Data Block Definition
@@ -296,6 +296,74 @@ ECU_DEFINITIONS = [
             "data": "mg/stroke",
             "x_axis": "RPM",
             "y_axis": "TPS"
+        }
+    },
+    {
+        "description": "Ignition Timing",
+        "type": "maptable",
+
+        # Data Block Definition
+        "data_address": 0x4000abaa,
+        "data_rows": 20,
+        "data_cols": 20,
+        "data_element_size": 1,
+        "data_scale": 0.25,
+        "data_offset": -10,
+        "data_reverse_scale": 4,
+        "data_reverse_offset": 10,
+
+        # X-Axis Definition (horizontal header)
+        "x_axis_address": 0x4000ab82,
+        "x_axis_length": 20,
+        "x_axis_element_size": 1,
+        "x_axis_scale": 31.25,
+        "x_axis_offset": 500,
+        "x_axis_reverse_scale": 0.032,
+        "x_axis_reverse_offset": -500,
+
+        # Y-Axis Definition (vertical header)
+        "y_axis_address": 0x4000ab96,
+        "y_axis_length": 20,
+        "y_axis_element_size": 1,
+        "y_axis_scale": 4,
+        "y_axis_offset": 0,
+        "y_axis_reverse_scale": 0.25,
+        "y_axis_reverse_offset": 0,
+
+        # Units for display
+        "units": {
+            "data": "°BTDC",
+            "x_axis": "RPM",
+            "y_axis": "Load"
+        }
+    },
+    {
+        "description": "Idle A",
+        "type": "maptable",
+
+        # Data Block Definition
+        "data_address": 0x4000b5b2,
+        "data_rows": 1,
+        "data_cols": 16,
+        "data_element_size": 1,
+        "data_scale": 10,
+        "data_offset": 0,
+        "data_reverse_scale": 0.01,
+        "data_reverse_offset": 0,
+
+        # X-Axis Definition (horizontal header)
+        "x_axis_address": 0x4000b5a2,
+        "x_axis_length": 16,
+        "x_axis_element_size": 1,
+        "x_axis_scale": 0.625,
+        "x_axis_offset": -40,
+        "x_axis_reverse_scale": 0.032,
+        "x_axis_reverse_offset": -500,
+
+        # Units for display
+        "units": {
+            "data": "RPM",
+            "x_axis": "ECT",
         }
     },
 ]
